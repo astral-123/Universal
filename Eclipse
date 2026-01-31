@@ -1,0 +1,636 @@
+-- Eclipse Hub Osmium Library
+-- Universal
+-- By Astral
+
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+
+local localPlayer = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- Variables
+local toggles = {
+    aimAssist = false,
+    aimAssistWallCheck = false,
+    aimAssistTargetBots = true,
+    espBox = false,
+    espLine = false,
+    espName = false,
+    espDistance = false,
+    espHealth = false,
+    espSkeleton = false,
+    espWeapon = false,
+    espShowBots = true,
+    espVisibleCheck = false
+}
+
+local espColors = {
+    box = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) },
+    line = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) },
+    name = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) },
+    distance = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) },
+    skeleton = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) },
+    weapon = { visible = Color3.fromRGB(0, 255, 0), hidden = Color3.fromRGB(255, 0, 0) }
+}
+
+local settings = {
+    aimAssistFOV = 100,
+    aimAssistSmoothing = 5,
+    aimPart = "Head",
+    aimAssistPrediction = 0
+}
+
+local savedConfigs = {}
+local espObjects = {}
+
+-- Skeleton Connections
+local skeletonConnections = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+    {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"}, {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+    {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"}, {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+}
+
+local r6SkeletonConnections = {
+    {"Head", "Torso"}, {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"}, {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"}
+}
+
+-- FOV Circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 50
+FOVCircle.Radius = settings.aimAssistFOV
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Visible = false
+FOVCircle.Transparency = 1
+
+-- Charger Osmium Library
+local _, library = pcall(loadstring(game:HttpGet("https://raw.githubusercontent.com/TrixAde/Osmium/main/OsmiumLibrary.lua")))
+local window = library:CreateWindow("🌙 Eclipse Hub")
+
+-- Créer les tabs
+local tabAimAssist = window:CreateTab("🎯 Aim Assist")
+local tabVisual = window:CreateTab("👁️ Visual ESP")
+local tabScripts = window:CreateTab("📜 Scripts")
+local tabSettings = window:CreateTab("⚙️ Settings")
+
+-- Helper Functions
+local function isBot(player)
+    if not player or not player:IsA("Player") then return true end
+    if player.UserId == 0 or player.UserId < 0 then return true end
+    if player.AccountAge == 0 then return true end
+    return false
+end
+
+local function isVisible(targetPart)
+    if not targetPart then return false end
+    local origin = camera.CFrame.Position
+    local direction = (targetPart.Position - origin).Unit * (targetPart.Position - origin).Magnitude
+    local ray = Ray.new(origin, direction)
+    local hit = Workspace:FindPartOnRayWithIgnoreList(ray, {localPlayer.Character, camera})
+    if hit then return hit:IsDescendantOf(targetPart.Parent) end
+    return false
+end
+
+local function getWeaponName(player)
+    if not player.Character then return "None" end
+    local tool = player.Character:FindFirstChildOfClass("Tool")
+    if tool then return tool.Name end
+    return "None"
+end
+
+-- Config Functions
+local function saveConfig(configName)
+    if configName == "" or configName == nil then
+        print("❌ Please enter a config name!")
+        return false
+    end
+    
+    local config = {
+        toggles = {},
+        settings = {},
+        espColors = {}
+    }
+    
+    for key, value in pairs(toggles) do config.toggles[key] = value end
+    for key, value in pairs(settings) do config.settings[key] = value end
+    for espType, colors in pairs(espColors) do
+        config.espColors[espType] = {
+            visible = colors.visible,
+            hidden = colors.hidden
+        }
+    end
+    
+    savedConfigs[configName] = config
+    print("✅ Config '" .. configName .. "' saved!")
+    return true
+end
+
+local function loadConfig(configName)
+    local config = savedConfigs[configName]
+    if not config then
+        print("❌ Config '" .. configName .. "' not found!")
+        return false
+    end
+    
+    for key, value in pairs(config.toggles) do toggles[key] = value end
+    for key, value in pairs(config.settings) do settings[key] = value end
+    for espType, colors in pairs(config.espColors) do
+        espColors[espType].visible = colors.visible
+        espColors[espType].hidden = colors.hidden
+    end
+    
+    FOVCircle.Radius = settings.aimAssistFOV
+    FOVCircle.Visible = toggles.aimAssist
+    print("✅ Config '" .. configName .. "' loaded!")
+    return true
+end
+
+local function deleteConfig(configName)
+    if savedConfigs[configName] then
+        savedConfigs[configName] = nil
+        print("🗑️ Config '" .. configName .. "' deleted!")
+        return true
+    else
+        print("❌ Config '" .. configName .. "' not found!")
+        return false
+    end
+end
+
+-- ESP Functions
+local function createESP(player)
+    if espObjects[player] then return end
+    
+    local esp = {
+        box = Drawing.new("Square"),
+        line = Drawing.new("Line"),
+        nameTag = Drawing.new("Text"),
+        distanceTag = Drawing.new("Text"),
+        healthBar = Drawing.new("Line"),
+        weaponTag = Drawing.new("Text"),
+        skeleton = {}
+    }
+    
+    esp.box.Thickness = 2
+    esp.box.Filled = false
+    esp.box.Color = Color3.fromRGB(255, 255, 255)
+    esp.box.Visible = false
+    esp.box.Transparency = 1
+    
+    esp.line.Thickness = 2
+    esp.line.Color = Color3.fromRGB(255, 255, 255)
+    esp.line.Visible = false
+    esp.line.Transparency = 1
+    
+    esp.nameTag.Size = 15
+    esp.nameTag.Center = true
+    esp.nameTag.Outline = true
+    esp.nameTag.Color = Color3.fromRGB(255, 255, 255)
+    esp.nameTag.Visible = false
+    esp.nameTag.Transparency = 1
+    
+    esp.distanceTag.Size = 13
+    esp.distanceTag.Center = true
+    esp.distanceTag.Outline = true
+    esp.distanceTag.Color = Color3.fromRGB(200, 200, 200)
+    esp.distanceTag.Visible = false
+    esp.distanceTag.Transparency = 1
+    
+    esp.healthBar.Thickness = 3
+    esp.healthBar.Color = Color3.fromRGB(0, 255, 0)
+    esp.healthBar.Visible = false
+    esp.healthBar.Transparency = 1
+    
+    esp.weaponTag.Size = 13
+    esp.weaponTag.Center = true
+    esp.weaponTag.Outline = true
+    esp.weaponTag.Color = Color3.fromRGB(255, 200, 100)
+    esp.weaponTag.Visible = false
+    esp.weaponTag.Transparency = 1
+    
+    for i = 1, 14 do
+        esp.skeleton[i] = Drawing.new("Line")
+        esp.skeleton[i].Thickness = 1.5
+        esp.skeleton[i].Color = Color3.fromRGB(255, 255, 255)
+        esp.skeleton[i].Visible = false
+        esp.skeleton[i].Transparency = 1
+    end
+    
+    espObjects[player] = esp
+end
+
+local function removeESP(player)
+    if not espObjects[player] then return end
+    local esp = espObjects[player]
+    esp.box:Remove()
+    esp.line:Remove()
+    esp.nameTag:Remove()
+    esp.distanceTag:Remove()
+    esp.healthBar:Remove()
+    esp.weaponTag:Remove()
+    for _, line in pairs(esp.skeleton) do line:Remove() end
+    espObjects[player] = nil
+end
+
+local function updateESP()
+    for player, esp in pairs(espObjects) do
+        if not player or not player.Parent then
+            removeESP(player)
+            continue
+        end
+        
+        if not toggles.espShowBots and isBot(player) then
+            esp.box.Visible = false
+            esp.line.Visible = false
+            esp.nameTag.Visible = false
+            esp.distanceTag.Visible = false
+            esp.healthBar.Visible = false
+            esp.weaponTag.Visible = false
+            for _, line in pairs(esp.skeleton) do line.Visible = false end
+            continue
+        end
+        
+        local character = player.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChild("Humanoid") then
+            esp.box.Visible = false
+            esp.line.Visible = false
+            esp.nameTag.Visible = false
+            esp.distanceTag.Visible = false
+            esp.healthBar.Visible = false
+            esp.weaponTag.Visible = false
+            for _, line in pairs(esp.skeleton) do line.Visible = false end
+            continue
+        end
+        
+        local humanoid = character.Humanoid
+        local rootPart = character.HumanoidRootPart
+        
+        if humanoid.Health <= 0 then
+            esp.box.Visible = false
+            esp.line.Visible = false
+            esp.nameTag.Visible = false
+            esp.distanceTag.Visible = false
+            esp.healthBar.Visible = false
+            esp.weaponTag.Visible = false
+            for _, line in pairs(esp.skeleton) do line.Visible = false end
+            continue
+        end
+        
+        local vector, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+        local isPlayerVisible = true
+        if toggles.espVisibleCheck then
+            isPlayerVisible = isVisible(rootPart)
+        end
+        
+        if onScreen then
+            local distance = (camera.CFrame.Position - rootPart.Position).Magnitude
+            
+            if toggles.espBox then
+                local headPos = camera:WorldToViewportPoint(character.Head.Position + Vector3.new(0, 0.5, 0))
+                local legPos = camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+                local boxHeight = math.abs(headPos.Y - legPos.Y)
+                local boxWidth = boxHeight / 2
+                esp.box.Size = Vector2.new(boxWidth, boxHeight)
+                esp.box.Position = Vector2.new(vector.X - boxWidth / 2, vector.Y - boxHeight / 2)
+                esp.box.Color = isPlayerVisible and espColors.box.visible or espColors.box.hidden
+                esp.box.Visible = true
+            else
+                esp.box.Visible = false
+            end
+            
+            if toggles.espLine then
+                esp.line.From = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+                esp.line.To = Vector2.new(vector.X, vector.Y)
+                esp.line.Color = isPlayerVisible and espColors.line.visible or espColors.line.hidden
+                esp.line.Visible = true
+            else
+                esp.line.Visible = false
+            end
+            
+            if toggles.espName then
+                local displayName = player.Name
+                if isBot(player) then displayName = displayName .. " [BOT]" end
+                esp.nameTag.Text = displayName
+                esp.nameTag.Position = Vector2.new(vector.X, vector.Y - 40)
+                esp.nameTag.Color = isPlayerVisible and espColors.name.visible or espColors.name.hidden
+                esp.nameTag.Visible = true
+            else
+                esp.nameTag.Visible = false
+            end
+            
+            if toggles.espDistance then
+                esp.distanceTag.Text = math.floor(distance) .. "m"
+                esp.distanceTag.Position = Vector2.new(vector.X, vector.Y + 30)
+                esp.distanceTag.Color = isPlayerVisible and espColors.distance.visible or espColors.distance.hidden
+                esp.distanceTag.Visible = true
+            else
+                esp.distanceTag.Visible = false
+            end
+            
+            if toggles.espHealth then
+                local headPos = camera:WorldToViewportPoint(character.Head.Position + Vector3.new(0, 0.5, 0))
+                local legPos = camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+                local boxHeight = math.abs(headPos.Y - legPos.Y)
+                local healthPercent = humanoid.Health / humanoid.MaxHealth
+                esp.healthBar.From = Vector2.new(vector.X - 35, headPos.Y)
+                esp.healthBar.To = Vector2.new(vector.X - 35, headPos.Y + (boxHeight * healthPercent))
+                esp.healthBar.Color = Color3.fromRGB(255 * (1 - healthPercent), 255 * healthPercent, 0)
+                esp.healthBar.Visible = true
+            else
+                esp.healthBar.Visible = false
+            end
+            
+            if toggles.espWeapon then
+                local weaponName = getWeaponName(player)
+                esp.weaponTag.Text = "🔫 " .. weaponName
+                esp.weaponTag.Position = Vector2.new(vector.X, vector.Y + 45)
+                esp.weaponTag.Color = isPlayerVisible and espColors.weapon.visible or espColors.weapon.hidden
+                esp.weaponTag.Visible = true
+            else
+                esp.weaponTag.Visible = false
+            end
+            
+            if toggles.espSkeleton then
+                local connections = character:FindFirstChild("UpperTorso") and skeletonConnections or r6SkeletonConnections
+                for i, connection in ipairs(connections) do
+                    local part1 = character:FindFirstChild(connection[1])
+                    local part2 = character:FindFirstChild(connection[2])
+                    if part1 and part2 and esp.skeleton[i] then
+                        local pos1, vis1 = camera:WorldToViewportPoint(part1.Position)
+                        local pos2, vis2 = camera:WorldToViewportPoint(part2.Position)
+                        if vis1 and vis2 then
+                            esp.skeleton[i].From = Vector2.new(pos1.X, pos1.Y)
+                            esp.skeleton[i].To = Vector2.new(pos2.X, pos2.Y)
+                            esp.skeleton[i].Color = isPlayerVisible and espColors.skeleton.visible or espColors.skeleton.hidden
+                            esp.skeleton[i].Visible = true
+                        else
+                            esp.skeleton[i].Visible = false
+                        end
+                    elseif esp.skeleton[i] then
+                        esp.skeleton[i].Visible = false
+                    end
+                end
+            else
+                for _, line in pairs(esp.skeleton) do line.Visible = false end
+            end
+        else
+            esp.box.Visible = false
+            esp.line.Visible = false
+            esp.nameTag.Visible = false
+            esp.distanceTag.Visible = false
+            esp.healthBar.Visible = false
+            esp.weaponTag.Visible = false
+            for _, line in pairs(esp.skeleton) do line.Visible = false end
+        end
+    end
+end
+
+-- Aim Assist Functions
+local function getClosestPlayerToCursor()
+    local closestPlayer = nil
+    local shortestDistance = settings.aimAssistFOV
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == localPlayer then continue end
+        if not toggles.aimAssistTargetBots and isBot(player) then continue end
+        
+        if player.Character and player.Character:FindFirstChild(settings.aimPart) and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local targetPart = player.Character[settings.aimPart]
+            if toggles.aimAssistWallCheck and not isVisible(targetPart) then continue end
+            
+            local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+            if onScreen then
+                local mousePos = UserInputService:GetMouseLocation()
+                local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                if distance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = distance
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+local function aimAt(player)
+    if not player or not player.Character or not player.Character:FindFirstChild(settings.aimPart) then return end
+    local targetPart = player.Character[settings.aimPart]
+    local targetPos = targetPart.Position
+    
+    if settings.aimAssistPrediction > 0 and player.Character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = player.Character.HumanoidRootPart
+        local velocity = rootPart.AssemblyLinearVelocity
+        local predictionTime = settings.aimAssistPrediction / 10
+        targetPos = targetPos + (velocity * predictionTime)
+    end
+    
+    local currentCamera = camera.CFrame
+    local targetCFrame = CFrame.new(currentCamera.Position, targetPos)
+    camera.CFrame = currentCamera:Lerp(targetCFrame, 1 / settings.aimAssistSmoothing)
+end
+
+-- ==================== TAB SCRIPTS ====================
+tabScripts:CreateLabel("🔧 Script Executors", "Load external scripts")
+
+tabScripts:CreateButton("🔍 Load Dex Explorer", function()
+    print("🔍 Loading Dex Explorer...")
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/infyiff/backup/main/dex.lua"))()
+    end)
+    print("✅ Dex Explorer Loaded")
+end)
+
+tabScripts:CreateButton("⚙️ Load Infinite Yield", function()
+    print("⚙️ Loading Infinite Yield...")
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+    end)
+    print("✅ Infinite Yield Loaded")
+end)
+
+-- ==================== TAB AIM ASSIST ====================
+tabAimAssist:CreateLabel("🎯 Advanced Aim Assist", "Lock onto players with prediction")
+
+tabAimAssist:CreateToggle("Enable Aim Assist", false, function()
+    toggles.aimAssist = not toggles.aimAssist
+    FOVCircle.Visible = toggles.aimAssist
+    print(toggles.aimAssist and "✅ Aim Assist ON" or "❌ Aim Assist OFF")
+end)
+
+tabAimAssist:CreateToggle("Wall Check", false, function()
+    toggles.aimAssistWallCheck = not toggles.aimAssistWallCheck
+    print(toggles.aimAssistWallCheck and "✅ Wall Check ON" or "❌ Wall Check OFF")
+end)
+
+tabAimAssist:CreateToggle("Target Bots/NPCs", true, function()
+    toggles.aimAssistTargetBots = not toggles.aimAssistTargetBots
+    print(toggles.aimAssistTargetBots and "✅ Target Bots ON" or "❌ Target Bots OFF")
+end)
+
+tabAimAssist:CreateSlider("FOV Size", 50, 400, function(value)
+    settings.aimAssistFOV = value
+    FOVCircle.Radius = value
+end)
+
+tabAimAssist:CreateSlider("Smoothing", 1, 30, function(value)
+    settings.aimAssistSmoothing = value
+end)
+
+tabAimAssist:CreateSlider("Prediction", 0, 20, function(value)
+    settings.aimAssistPrediction = value
+    print(value > 0 and "🎯 Prediction: " .. value or "🎯 Prediction OFF")
+end)
+
+local aimPartDropdown = tabAimAssist:CreateDropdown("Target Part", {"Head", "Torso", "HumanoidRootPart"}, function(value)
+    if value == "Torso" then
+        settings.aimPart = "UpperTorso"
+    else
+        settings.aimPart = value
+    end
+    print("🎯 Targeting:", value)
+end)
+
+-- ==================== TAB VISUAL ====================
+tabVisual:CreateLabel("👁️ Advanced ESP", "See players through walls with customization")
+
+tabVisual:CreateToggle("ESP Box", false, function()
+    toggles.espBox = not toggles.espBox
+    if toggles.espBox then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espBox and "✅ ESP Box ON" or "❌ ESP Box OFF")
+end)
+
+tabVisual:CreateToggle("ESP Line", false, function()
+    toggles.espLine = not toggles.espLine
+    if toggles.espLine then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espLine and "✅ ESP Line ON" or "❌ ESP Line OFF")
+end)
+
+tabVisual:CreateToggle("ESP Name", false, function()
+    toggles.espName = not toggles.espName
+    if toggles.espName then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espName and "✅ ESP Name ON" or "❌ ESP Name OFF")
+end)
+
+tabVisual:CreateToggle("ESP Distance", false, function()
+    toggles.espDistance = not toggles.espDistance
+    if toggles.espDistance then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espDistance and "✅ ESP Distance ON" or "❌ ESP Distance OFF")
+end)
+
+tabVisual:CreateToggle("ESP Health Bar", false, function()
+    toggles.espHealth = not toggles.espHealth
+    if toggles.espHealth then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espHealth and "✅ ESP Health ON" or "❌ ESP Health OFF")
+end)
+
+tabVisual:CreateToggle("ESP Skeleton", false, function()
+    toggles.espSkeleton = not toggles.espSkeleton
+    if toggles.espSkeleton then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espSkeleton and "✅ ESP Skeleton ON" or "❌ ESP Skeleton OFF")
+end)
+
+tabVisual:CreateToggle("ESP Weapon/Tool", false, function()
+    toggles.espWeapon = not toggles.espWeapon
+    if toggles.espWeapon then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then createESP(player) end
+        end
+    end
+    print(toggles.espWeapon and "✅ ESP Weapon ON" or "❌ ESP Weapon OFF")
+end)
+
+tabVisual:CreateToggle("Show Bots/NPCs", true, function()
+    toggles.espShowBots = not toggles.espShowBots
+    print(toggles.espShowBots and "✅ Show Bots ON" or "❌ Show Bots OFF")
+end)
+
+tabVisual:CreateToggle("Visible Check (Color Change)", false, function()
+    toggles.espVisibleCheck = not toggles.espVisibleCheck
+    print(toggles.espVisibleCheck and "✅ Visible Check ON" or "❌ Visible Check OFF")
+end)
+
+-- ==================== TAB SETTINGS ====================
+tabSettings:CreateLabel("Owner", "Created by Astral")
+tabSettings:CreateLabel("Controls", "Press LeftAlt to toggle UI")
+
+-- Player Events
+Players.PlayerAdded:Connect(function(player)
+    task.wait(1)
+    if player ~= localPlayer then createESP(player) end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        createESP(player)
+        player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            removeESP(player)
+            createESP(player)
+        end)
+    end
+end
+
+localPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    for player, _ in pairs(espObjects) do
+        removeESP(player)
+        if player.Parent then createESP(player) end
+    end
+end)
+
+-- Main Loop
+RunService.RenderStepped:Connect(function()
+    if toggles.aimAssist then
+        local mousePos = UserInputService:GetMouseLocation()
+        FOVCircle.Position = mousePos
+        FOVCircle.Visible = true
+        
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+            local target = getClosestPlayerToCursor()
+            if target then aimAt(target) end
+        end
+    else
+        FOVCircle.Visible = false
+    end
+    
+    updateESP()
+end)
